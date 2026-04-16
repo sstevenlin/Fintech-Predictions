@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@polymarket/clob-client": "^5.8.1",
+    "ethers": "^5.8.0",
+    "kalshi-typescript": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
+    "typescript": "^6.0.2"
+  }
+}
