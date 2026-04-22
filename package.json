@@ -1,0 +1,16 @@
+{
+  "name": "fintech-predictions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kalshi Paper Trader MVP",
+  "scripts": {
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:status": "supabase status",
+    "db:studio": "supabase status -o env | grep STUDIO_URL"
+  },
+  "devDependencies": {
+    "supabase": "^1.200.0"
+  }
+}
