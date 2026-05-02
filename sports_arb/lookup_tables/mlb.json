@@ -1,0 +1,25 @@
+{
+  "_source": "MLB leverage index / win expectancy tables (public). Focus on late-inning events.",
+  "_unit": "win probability delta for the home team, signed.",
+
+  "SCORING_PLAY:late_close": {
+    "delta": 0.22,
+    "confidence": "high",
+    "note": "Home run or walk-off RBI in innings 7+ when margin <= 2 runs."
+  },
+  "SCORING_PLAY:late": {
+    "delta": 0.12,
+    "confidence": "medium",
+    "note": "Scoring play in innings 7+ when margin 3-4 runs."
+  },
+  "SCORING_PLAY": {
+    "delta": 0.05,
+    "confidence": "low",
+    "note": "Scoring play in innings 1-6 or blowout."
+  },
+  "PITCHING_CHANGE": {
+    "delta": 0.04,
+    "confidence": "low",
+    "note": "Late-inning pitching change. Direction depends on matchup quality — not modeled yet."
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "_source": "pbpstats win probability model (public). Deltas calibrated to 4th-quarter scenarios.",
+  "_unit": "win probability delta for the home team, signed.",
+
+  "SCORING_PLAY:late": {
+    "delta": 0.18,
+    "confidence": "high",
+    "note": "Basket in Q4 or OT when margin <= 5 pts."
+  },
+  "SCORING_PLAY": {
+    "delta": 0.06,
+    "confidence": "medium",
+    "note": "Basket in Q1-Q3 or blowout scenario."
+  },
+  "EJECTION": {
+    "delta": 0.12,
+    "confidence": "medium",
+    "note": "Key player ejection. Sign flips depending on which team loses the player."
+  },
+  "INJURY": {
+    "delta": 0.10,
+    "confidence": "low",
+    "note": "Star player injury. Magnitude highly player-dependent."
+  }
+}

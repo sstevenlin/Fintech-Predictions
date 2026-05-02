@@ -1,1 +1,51 @@
+# environment
 .env
+.env.local
+.env.*.local
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.js.map
+
+# TypeScript
+*.tsbuildinfo
+
+# Supabase local state
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# keys / secrets
+keys/
+*.pem
+*.p8
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# logs
+*.log
+npm-debug.log*
+
+# test coverage
+coverage/

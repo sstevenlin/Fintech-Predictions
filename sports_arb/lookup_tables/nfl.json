@@ -1,0 +1,30 @@
+{
+  "_source": "nflfastR win probability model (public). Deltas are approximate; calibrate against Phase 0 data.",
+  "_unit": "win probability delta for the home team, signed. Positive = home improves.",
+
+  "SCORING_PLAY:close": {
+    "delta": 0.30,
+    "confidence": "high",
+    "note": "Scoring play when margin <= 7 pts. Whichever team scored, swing is large."
+  },
+  "SCORING_PLAY:medium": {
+    "delta": 0.15,
+    "confidence": "medium",
+    "note": "Scoring play when margin 8-14 pts."
+  },
+  "SCORING_PLAY:blowout": {
+    "delta": 0.05,
+    "confidence": "low",
+    "note": "Scoring play when margin > 14 pts. Diminishing returns."
+  },
+  "TURNOVER": {
+    "delta": 0.12,
+    "confidence": "medium",
+    "note": "Fumble or interception. Direction depends on possession context (see detector)."
+  },
+  "INJURY": {
+    "delta": 0.08,
+    "confidence": "low",
+    "note": "Starter injury. Magnitude depends heavily on player importance — not modeled yet."
+  }
+}
