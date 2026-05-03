@@ -38,12 +38,13 @@ async function main() {
 
       const events = detectEvents(prev, next);
       for (const event of events) {
-        const ticker = await resolveKalshiTicker(
+        const market = await resolveKalshiTicker(
           event.gameId,
           event.nextState.homeTeam,
           event.nextState.awayTeam,
           event.sport,
         );
+        const ticker = market?.ticker ?? null;
         const price0 = ticker ? await getMarketPrice(ticker) : null;
 
         const eventId = await logEvent(event, ticker);
@@ -51,8 +52,14 @@ async function main() {
 
         console.log(`[observer] ${event.sport} ${event.eventType} | ${event.description}`);
 
-        if (price0 != null) {
-          const fairValue = estimateFairValue(event, ticker!, price0);
+        if (price0 != null && market) {
+          const fairValue = estimateFairValue(
+            event,
+            market.ticker,
+            price0,
+            market.contractType,
+            market.side === 'home',
+          );
           await logEdgeSnapshot(eventId, 't0', price0, fairValue ?? undefined);
         }
 

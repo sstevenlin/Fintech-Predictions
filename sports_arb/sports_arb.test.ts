@@ -63,6 +63,26 @@ describe('fair_value', () => {
     expect(result!.estimatedFairPrice).toBeLessThan(52);
   });
 
+  it('flips delta again when YES contract pays on the away team', () => {
+    const next = { ...nflBase, homeScore: 21 };
+    const [event] = detectEvents(nflBase, next);
+    const homeYes = estimateFairValue(event, 't', 52, 'per_game', true)!;
+    const awayYes = estimateFairValue(event, 't', 52, 'per_game', false)!;
+    expect(homeYes.deltaWinProb).toBeGreaterThan(0);
+    expect(awayYes.deltaWinProb).toBeLessThan(0);
+  });
+
+  it('halves the delta on a series-winner contract', () => {
+    const next = { ...nflBase, sport: 'NBA' as const, period: 4, clock: '6:00', homeScore: 100, awayScore: 96 };
+    const prev = { ...next, homeScore: 98 };
+    const [event] = detectEvents(prev, next);
+    const perGame = estimateFairValue(event, 't', 50, 'per_game', true)!;
+    const series  = estimateFairValue(event, 't', 50, 'series_winner', true)!;
+    // Series should produce roughly half the move of per_game (with rounding tolerance).
+    expect(Math.abs(series.deltaWinProb)).toBeLessThan(Math.abs(perGame.deltaWinProb));
+    expect(Math.abs(series.deltaWinProb)).toBeCloseTo(perGame.deltaWinProb / 2, 1);
+  });
+
   it('attenuates the delta in late-clock NBA garbage time', () => {
     const prev: GameState = { ...nflBase, sport: 'NBA', period: 4, clock: '0:08', homeScore: 100, awayScore: 80 };
     const next: GameState = { ...prev, awayScore: 82 };

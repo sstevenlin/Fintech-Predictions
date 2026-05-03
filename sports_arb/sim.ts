@@ -15,11 +15,13 @@ import {
   exitFillPrice,
   realizedPnlCents,
 } from './exit_manager';
+import type { ContractType } from './market_map';
 
 interface Scenario {
   label: string;
   prev: GameState;
   next: GameState;
+  contractType: ContractType;
   // Simulated Kalshi quote at moment of event.
   entryQuote: KalshiQuote;
   // Quote a moment later, when the exit check fires.
@@ -44,6 +46,7 @@ const SCENARIOS: Scenario[] = [
     // NBA Q4 with > 5 min left — full +18pp delta. mid 49 → fair 67. Buy YES @ ask=50.
     // Exit when crowd repriced toward 64 (slight under-shoot).
     label: 'NBA — Q4 6:10  BOS 98 – 96 MIA  →  BOS scores',
+    contractType: 'per_game',
     entryQuote: quoteAroundMid(49),
     exitQuote: quoteAroundMid(64),
     prev: { gameId: 'sim-nba-1', sport: 'NBA', homeTeam: 'BOS', awayTeam: 'MIA', homeScore: 98, awayScore: 96, clock: '6:10', period: 4, recordedAt: now() },
@@ -52,6 +55,7 @@ const SCENARIOS: Scenario[] = [
   {
     // NFL Q4 close turnover. mid 50 → fair ≈ 38. Buy NO. Exit when mid drifts to 41.
     label: 'NFL — Q4 4:30  KC 21 – 21 BUF  →  KC turns it over',
+    contractType: 'per_game',
     entryQuote: quoteAroundMid(50),
     exitQuote: quoteAroundMid(41),
     prev: { gameId: 'sim-nfl-1', sport: 'NFL', homeTeam: 'KC', awayTeam: 'BUF', homeScore: 21, awayScore: 21, clock: '4:30', period: 4, possession: 'KC', down: 3, yardsToGo: 8, recordedAt: now() },
@@ -60,10 +64,22 @@ const SCENARIOS: Scenario[] = [
   {
     // MLB bottom-8 late_close. mid 50 → fair ≈ 72. Buy YES, mid moves to 65.
     label: 'MLB — bottom 8th  NYY 3 – 3 BOS  →  NYY scores',
+    contractType: 'per_game',
     entryQuote: quoteAroundMid(50),
     exitQuote: quoteAroundMid(65),
     prev: { gameId: 'sim-mlb-1', sport: 'MLB', homeTeam: 'NYY', awayTeam: 'BOS', homeScore: 3, awayScore: 3, clock: null, period: 8, outs: 1, basesOccupied: 0b010, recordedAt: now() },
     next: { gameId: 'sim-mlb-1', sport: 'MLB', homeTeam: 'NYY', awayTeam: 'BOS', homeScore: 4, awayScore: 3, clock: null, period: 8, outs: 2, basesOccupied: 0, recordedAt: now() },
+  },
+  {
+    // Series-winner ticker: same NBA Q4 scoring play, but on a series contract.
+    // The contract-type scale halves the delta vs the per-game scenario above —
+    // exactly what we want, because a single-game outcome only partially updates a series.
+    label: 'NBA series-winner — same play, halved delta',
+    contractType: 'series_winner',
+    entryQuote: quoteAroundMid(49),
+    exitQuote: quoteAroundMid(56),
+    prev: { gameId: 'sim-nba-2', sport: 'NBA', homeTeam: 'BOS', awayTeam: 'MIA', homeScore: 98, awayScore: 96, clock: '6:10', period: 4, recordedAt: now() },
+    next: { gameId: 'sim-nba-2', sport: 'NBA', homeTeam: 'BOS', awayTeam: 'MIA', homeScore: 100, awayScore: 96, clock: '5:48', period: 4, recordedAt: now() },
   },
 ];
 
@@ -80,7 +96,7 @@ export async function runSim(): Promise<void> {
   const closed: ClosedPosition[] = [];
 
   for (let i = 0; i < SCENARIOS.length; i++) {
-    const { label, prev, next, entryQuote, exitQuote } = SCENARIOS[i];
+    const { label, prev, next, entryQuote, exitQuote, contractType } = SCENARIOS[i];
     divider();
     console.log(`[sim] ${i + 1}/${SCENARIOS.length}  ${label}`);
     divider();
@@ -95,7 +111,8 @@ export async function runSim(): Promise<void> {
 
     for (const event of events) {
       const ticker = `${event.sport}WIN-SIM-${event.nextState.homeTeam}-${event.nextState.awayTeam}`;
-      const fairValue = estimateFairValue(event, ticker, entryQuote.yesMid!);
+      // Sim always trades the home side, so homeIsYes=true.
+      const fairValue = estimateFairValue(event, ticker, entryQuote.yesMid!, contractType, true);
       if (!fairValue) {
         console.log(`[sim] no fair value for ${event.sport} ${event.eventType}\n`);
         continue;
@@ -103,7 +120,7 @@ export async function runSim(): Promise<void> {
 
       const edge = fairValue.estimatedFairPrice - entryQuote.yesMid!;
       console.log(`[sim] detected  : ${event.eventType} — ${event.description}`);
-      console.log(`[sim] market    : ${ticker} bid=${entryQuote.yesBid}c ask=${entryQuote.yesAsk}c mid=${entryQuote.yesMid}c`);
+      console.log(`[sim] market    : ${ticker} [${contractType}] bid=${entryQuote.yesBid}c ask=${entryQuote.yesAsk}c mid=${entryQuote.yesMid}c`);
       console.log(`[sim] model     : fair=${fairValue.estimatedFairPrice}c  edge=${edge > 0 ? '+' : ''}${edge}c  Δwin=${fairValue.deltaWinProb > 0 ? '+' : ''}${(fairValue.deltaWinProb * 100).toFixed(1)}%  confidence=${fairValue.confidence}`);
 
       const signal = evaluate(fairValue);

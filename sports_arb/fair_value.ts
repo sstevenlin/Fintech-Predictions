@@ -2,6 +2,7 @@ import nfl from './lookup_tables/nfl.json';
 import nba from './lookup_tables/nba.json';
 import mlb from './lookup_tables/mlb.json';
 import type { GameEvent, FairValueResult, Sport, GameState } from './types';
+import type { ContractType } from './market_map';
 
 interface LookupEntry {
   delta: number;
@@ -19,6 +20,8 @@ export function estimateFairValue(
   event: GameEvent,
   kalshiTicker: string,
   currentKalshiPrice: number,
+  contractType: ContractType = 'per_game',
+  homeIsYes = true,
 ): FairValueResult | null {
   const table = TABLES[event.sport];
   if (!table) return null;
@@ -31,6 +34,9 @@ export function estimateFairValue(
   const scoredHome = event.nextState.homeScore > event.prevState.homeScore;
   let signedDelta = scoredHome ? entry.delta : -entry.delta;
 
+  // Flip if the YES contract pays on the AWAY team winning (we resolved an away-side ticker).
+  if (!homeIsYes) signedDelta = -signedDelta;
+
   // Scale by Δscore: 1-pt FT shouldn't move WP like a 3-pointer. Multi-point bundles
   // also scale up (the feed sometimes batches a make + and-one into one update).
   const scoreScale = pointsScale(event.prevState, event.nextState);
@@ -40,9 +46,16 @@ export function estimateFairValue(
   const clockScale = clockDecay(event.sport, event.nextState);
   signedDelta *= clockScale;
 
+  // Series-winner contracts move less per-event than per-game contracts:
+  // outcome of the series is an aggregate, and individual game results only
+  // partially update it. The 0.5 factor is conservative — exact factor depends
+  // on how many games remain, which we don't always know without scraping.
+  const contractScale = contractTypeScale(contractType);
+  signedDelta *= contractScale;
+
   // Confidence drops when the model is heavily attenuated.
   let confidence = entry.confidence;
-  const totalScale = scoreScale * clockScale;
+  const totalScale = scoreScale * clockScale * contractScale;
   if (totalScale < 0.4 && confidence === 'high') confidence = 'medium';
   if (totalScale < 0.15) confidence = 'low';
 
@@ -58,6 +71,13 @@ export function estimateFairValue(
     deltaWinProb: signedDelta,
     confidence,
   };
+}
+
+export function contractTypeScale(type: ContractType): number {
+  switch (type) {
+    case 'per_game':       return 1.0;
+    case 'series_winner':  return 0.5;
+  }
 }
 
 function buildLookupKey(event: GameEvent): string {

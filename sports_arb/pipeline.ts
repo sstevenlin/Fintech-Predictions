@@ -11,6 +11,7 @@ import { evaluate, placeOrder } from './router';
 import { ExitManager, shouldExit, exitFillPrice, realizedPnlCents } from './exit_manager';
 import { getMarketQuote } from './kalshi_client';
 import { resolveKalshiTicker } from './market_map';
+import type { ResolvedMarket } from './market_map';
 import { attachFileLogger } from './file_logger';
 import {
   attachTradeJournal,
@@ -84,28 +85,38 @@ async function main() {
           `[pipeline] event | ${event.sport} ${event.eventType} | ${event.description}`,
         );
 
-        const ticker = await resolveKalshiTicker(
+        const market = await resolveKalshiTicker(
           event.gameId,
           event.nextState.homeTeam,
           event.nextState.awayTeam,
           event.sport,
         );
-        if (!ticker) {
+        if (!market) {
           recordSkip('', 'no_market', { gameId: event.gameId });
           console.log(`[pipeline] skip | no kalshi market for ${event.gameId}`);
           continue;
         }
 
-        const quote = await fetchQuoteCached(ticker, quoteCache);
+        // resolveKalshiTicker already returned a snapshot quote that passed
+        // the liquidity filter. We still re-fetch through the cache for the
+        // freshest price right at signal time.
+        const quote = await fetchQuoteCached(market.ticker, quoteCache);
         if (!quote || quote.yesMid == null) {
-          recordSkip(ticker, 'no_quote');
-          console.log(`[pipeline] skip | could not read quote for ${ticker}`);
+          recordSkip(market.ticker, 'no_quote');
+          console.log(`[pipeline] skip | could not read quote for ${market.ticker}`);
           continue;
         }
 
-        const fairValue = estimateFairValue(event, ticker, quote.yesMid);
+        const homeIsYes = market.side === 'home';
+        const fairValue = estimateFairValue(
+          event,
+          market.ticker,
+          quote.yesMid,
+          market.contractType,
+          homeIsYes,
+        );
         if (!fairValue) {
-          recordSkip(ticker, 'no_fair_value', {
+          recordSkip(market.ticker, 'no_fair_value', {
             sport: event.sport,
             eventType: event.eventType,
           });
@@ -114,7 +125,8 @@ async function main() {
         }
 
         console.log(
-          `[pipeline] fair-value | ${ticker} bid=${quote.yesBid}c ask=${quote.yesAsk}c mid=${quote.yesMid}c ` +
+          `[pipeline] fair-value | ${market.ticker} [${market.contractType}/${market.side}] ` +
+          `bid=${quote.yesBid}c ask=${quote.yesAsk}c mid=${quote.yesMid}c ` +
           `fair=${fairValue.estimatedFairPrice}c Δ=${(fairValue.deltaWinProb * 100).toFixed(1)}pp ` +
           `confidence=${fairValue.confidence}`,
         );

@@ -10,6 +10,7 @@
     "db:status": "supabase status",
     "db:studio": "supabase status -o env | grep STUDIO_URL",
     "observe": "ts-node observation/run.ts",
+    "replay": "ts-node observation/replay.ts",
     "paper": "ts-node sports_arb/pipeline.ts --dry-run",
     "sim": "ts-node sports_arb/pipeline.ts --sim",
     "test": "jest",
