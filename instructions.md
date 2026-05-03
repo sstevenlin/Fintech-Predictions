@@ -123,7 +123,24 @@ The pipeline will place real limit orders on Kalshi. Positions are held up to 60
 | `KALSHI_ENV` | optional | Set to `demo` for Kalshi sandbox |
 | `POLL_INTERVAL_MS` | optional | Feed poll rate in ms (default: 500) |
 | `MIN_EDGE_CENTS` | optional | Minimum edge to trade (default: 5) |
+| `MAX_QUANTITY` | optional | Contracts per order (default: 10) |
 | `DRY_RUN` | optional | Set to `false` for live orders (default: true) |
+
+---
+
+## Trade journal (Phase 1)
+
+Every paper-trade run also writes a JSON-lines journal next to the human log:
+
+```
+logs/paper-<timestamp>.log     # human-readable
+logs/paper-<timestamp>.jsonl   # one record per event/signal/open/exit/skip
+```
+
+Each `exit` record carries the realised P&L computed against the cross-spread fill
+prices — buy at ask, sell at bid — so the numbers reflect the friction a live
+order would actually pay. Replay or aggregate offline with whatever script you
+prefer; the format is self-describing.
 
 ---
 

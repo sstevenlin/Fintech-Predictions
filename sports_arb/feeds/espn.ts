@@ -1,4 +1,5 @@
 import type { Feed } from './base';
+import { runPollLoop } from './base';
 import type { GameState, Sport } from '../types';
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
@@ -11,17 +12,20 @@ const SPORT_PATHS: Record<string, string> = {
 
 export class EspnFeed implements Feed {
   readonly name = 'espn';
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private handle: { stop: () => void } | null = null;
   private lastFreshAt: Record<string, number> = {};
 
   async poll(): Promise<GameState[]> {
     const results: GameState[] = [];
+    let anyOk = false;
+    let firstErr: unknown = null;
     for (const [sport, path] of Object.entries(SPORT_PATHS)) {
       try {
         const res = await fetch(`${ESPN_BASE}/${path}/scoreboard`, {
           headers: { 'User-Agent': process.env.ESPN_USER_AGENT ?? 'fintech-predictions/0.1' },
         });
-        if (!res.ok) continue;
+        if (!res.ok) { firstErr = firstErr ?? new Error(`${sport} HTTP ${res.status}`); continue; }
+        anyOk = true;
         const data = await res.json();
         const states = parseScoreboard(data, sport as Sport);
         for (const state of states) {
@@ -33,24 +37,26 @@ export class EspnFeed implements Feed {
           }
         }
       } catch (err) {
-        console.error(`[espn] poll error for ${sport}:`, err);
+        firstErr = firstErr ?? err;
       }
     }
+    // If every sport failed, propagate so the backoff loop notices.
+    if (!anyOk && firstErr) throw firstErr;
     return results;
   }
 
   start(intervalMs: number, onUpdate: (states: GameState[]) => void): void {
-    this.timer = setInterval(async () => {
-      const states = await this.poll();
-      if (states.length > 0) onUpdate(states);
-    }, intervalMs);
+    this.handle = runPollLoop({
+      name: this.name,
+      intervalMs,
+      pollFn: () => this.poll(),
+      onUpdate,
+    });
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.handle?.stop();
+    this.handle = null;
   }
 }
 

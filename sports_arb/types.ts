@@ -53,12 +53,34 @@ export interface TradeSignal {
   reason: string;
 }
 
+export interface KalshiQuote {
+  yesBid: number | null;
+  yesAsk: number | null;
+  yesMid: number | null;
+  last: number | null;
+}
+
 export interface OpenPosition {
+  id: string;
   kalshiTicker: string;
   side: 'yes' | 'no';
   quantity: number;
-  entryPrice: number;
+  // Fill price actually paid (cross-the-spread): yes_ask for buy_yes, (100-yes_bid) for buy_no.
+  // entryYesMid is preserved for the model's exit-target reference.
+  entryFillPrice: number;
+  entryYesMid: number;
+  entryQuote: KalshiQuote;
   enteredAt: number;
-  targetExitPrice: number;
-  hardExitAt: number; // epoch ms
+  targetYesMid: number;   // exit triggers when yes-mid crosses this
+  hardExitAt: number;     // epoch ms
+}
+
+export interface ClosedPosition {
+  position: OpenPosition;
+  exitedAt: number;
+  exitFillPrice: number;       // realistic (cross-spread) sell price for the held side
+  exitYesMid: number;
+  exitQuote: KalshiQuote;
+  pnlCents: number;            // (exitFill - entryFill) * qty for yes-side semantics
+  reason: 'target' | 'timeout';
 }

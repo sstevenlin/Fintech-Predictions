@@ -1,5 +1,6 @@
 import { createSign, constants } from 'crypto';
 import { readFileSync } from 'fs';
+import type { KalshiQuote } from './types';
 
 const BASE = process.env.KALSHI_ENV === 'demo'
   ? 'https://demo-api.kalshi.co/trade-api/v2'
@@ -31,22 +32,35 @@ function dollarsToCents(s: string | undefined): number | null {
   return Math.round(n * 100);
 }
 
-// Returns the YES mid-price in cents (0–100), or null on failure.
-export async function getMarketPrice(ticker: string): Promise<number | null> {
+function quoteFromMarket(m: KalshiMarket): KalshiQuote {
+  const yesBid = dollarsToCents(m.yes_bid_dollars) ?? m.yes_bid ?? null;
+  const yesAsk = dollarsToCents(m.yes_ask_dollars) ?? m.yes_ask ?? null;
+  const last = dollarsToCents(m.last_price_dollars) ?? m.last_price ?? null;
+  const yesMid = (yesBid != null && yesAsk != null)
+    ? Math.round((yesBid + yesAsk) / 2)
+    : last;
+  return { yesBid, yesAsk, yesMid, last };
+}
+
+// Returns the full YES-side quote (bid/ask/mid/last in cents) or null on failure.
+// Use this when realistic fill prices matter.
+export async function getMarketQuote(ticker: string): Promise<KalshiQuote | null> {
   try {
     const res = await fetch(`${BASE}/markets/${encodeURIComponent(ticker)}`);
     if (!res.ok) return null;
     const { market: m } = await res.json() as { market: KalshiMarket };
     if (!m) return null;
-    const bid = dollarsToCents(m.yes_bid_dollars) ?? m.yes_bid ?? null;
-    const ask = dollarsToCents(m.yes_ask_dollars) ?? m.yes_ask ?? null;
-    if (bid != null && ask != null) {
-      return Math.round((bid + ask) / 2);
-    }
-    return dollarsToCents(m.last_price_dollars) ?? m.last_price ?? null;
+    return quoteFromMarket(m);
   } catch {
     return null;
   }
+}
+
+// Returns the YES mid-price in cents (0–100), or null on failure.
+// Thin wrapper preserved for callers that only care about a single number.
+export async function getMarketPrice(ticker: string): Promise<number | null> {
+  const q = await getMarketQuote(ticker);
+  return q?.yesMid ?? null;
 }
 
 // Lists open markets for a Kalshi series ticker (e.g., 'NBAWIN').

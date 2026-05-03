@@ -1,37 +1,33 @@
 import type { Feed } from './base';
+import { runPollLoop } from './base';
 import type { GameState } from '../types';
 
 const MLB_SCOREBOARD = 'https://statsapi.mlb.com/api/v1/schedule?sportId=1&hydrate=linescore';
 
 export class MlbFeed implements Feed {
   readonly name = 'mlb-official';
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private handle: { stop: () => void } | null = null;
 
   async poll(): Promise<GameState[]> {
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const res = await fetch(`${MLB_SCOREBOARD}&date=${today}`);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return parseMlbSchedule(data);
-    } catch (err) {
-      console.error('[mlb] poll error:', err);
-      return [];
-    }
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch(`${MLB_SCOREBOARD}&date=${today}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return parseMlbSchedule(data);
   }
 
   start(intervalMs: number, onUpdate: (states: GameState[]) => void): void {
-    this.timer = setInterval(async () => {
-      const states = await this.poll();
-      if (states.length > 0) onUpdate(states);
-    }, intervalMs);
+    this.handle = runPollLoop({
+      name: this.name,
+      intervalMs,
+      pollFn: () => this.poll(),
+      onUpdate,
+    });
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.handle?.stop();
+    this.handle = null;
   }
 }
 

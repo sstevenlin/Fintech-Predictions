@@ -135,3 +135,35 @@ This data feeds the observation phase: after 2–4 weeks you can query hit rates
 - Another participant beats you to the same trade (the order fills at a worse price)
 
 The observation phase exists specifically to measure how often the model is right and whether the edge exceeds transaction costs before committing capital.
+
+---
+
+## Phase 1 status
+
+The pipeline now runs Phase 1 (paper trading with realistic friction) end to end:
+
+- **Slippage is modelled.** Entries pay `yes_ask` (or `100 - yes_bid` for NO);
+  exits sell at `yes_bid` (or `100 - yes_ask`). The router refuses signals whose
+  edge is already eaten by the cross-spread cost.
+- **Multiple positions per market are supported.** Each open position has a
+  unique id; back-to-back signals on the same ticker no longer overwrite each
+  other.
+- **Fair value attenuates near the buzzer.** A bucket with eight seconds left
+  in Q4 is no longer treated like a bucket with six minutes left, and 1-point
+  free throws are scaled relative to 2- and 3-point buckets.
+- **Feeds back off on network failure.** A dead connection produces one error
+  line plus exponential backoff up to 30 seconds, instead of a 500ms retry
+  storm.
+- **Every action is journaled.** A JSON-lines file (`logs/paper-*.jsonl`)
+  records every event, signal, fill, and exit so P&L can be recomputed offline.
+
+Sim mode (`npm run sim`) closes three scripted scenarios at +330¢ realised
+under a 2¢ spread — Phase 1's exit criterion (positive simulated P&L after
+realistic slippage) is met on the canned data.
+
+What's still deferred for Phase 2:
+- Persistence into the Supabase `orders`/`fills`/`positions` tables on the
+  database branch. The JSONL journal is the durable record for now.
+- Liquidity-aware sizing — `MAX_QUANTITY` is still a flat configuration knob.
+- Detection of non-scoring events (NBA ejections, MLB pitching changes,
+  injury news from Twitter/X).

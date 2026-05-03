@@ -1,4 +1,5 @@
 import type { Feed } from './base';
+import { runPollLoop } from './base';
 import type { GameState } from '../types';
 
 // NBA Stats API — typically 1-3s fresher than ESPN's CDN-cached response
@@ -6,32 +7,27 @@ const NBA_SCOREBOARD = 'https://cdn.nba.com/static/json/liveData/scoreboard/toda
 
 export class NbaFeed implements Feed {
   readonly name = 'nba-official';
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private handle: { stop: () => void } | null = null;
 
   async poll(): Promise<GameState[]> {
-    try {
-      const res = await fetch(NBA_SCOREBOARD);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return parseNbaScoreboard(data);
-    } catch (err) {
-      console.error('[nba] poll error:', err);
-      return [];
-    }
+    const res = await fetch(NBA_SCOREBOARD);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return parseNbaScoreboard(data);
   }
 
   start(intervalMs: number, onUpdate: (states: GameState[]) => void): void {
-    this.timer = setInterval(async () => {
-      const states = await this.poll();
-      if (states.length > 0) onUpdate(states);
-    }, intervalMs);
+    this.handle = runPollLoop({
+      name: this.name,
+      intervalMs,
+      pollFn: () => this.poll(),
+      onUpdate,
+    });
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.handle?.stop();
+    this.handle = null;
   }
 }
 
