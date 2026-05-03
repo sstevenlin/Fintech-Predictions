@@ -4,41 +4,52 @@
 
 | Command | What it does | Dependencies |
 |---|---|---|
-| `npm run sim` | Scripted demo, no live data | None |
-| `npm run paper` | Live games, no real money | Supabase + Kalshi API |
-| `npm run observe` | Record price data for analysis | Supabase + Kalshi API |
-| `npm test` | Run unit tests | None |
-| `npm run typecheck` | TypeScript type check | None |
+| `npm run sim`       | Scripted demo, no live data            | None |
+| `npm run paper`     | Live games, no real money (default)    | Kalshi public API only |
+| `npm run replay`    | Aggregate paper-mode JSONL into stats  | None |
+| `npm run observe`   | Record price snapshots into Supabase   | Supabase + Kalshi public API |
+| `npm test`          | Run jest unit tests                    | None |
+| `npm run typecheck` | TypeScript type check                  | None |
 
 ---
 
 ## Mode 1 — Simulation (no setup required)
 
-Runs three scripted game scenarios through the full pipeline. No API keys, no database.
+Runs four scripted scenarios through the full detector → fair-value → router →
+exit-manager pipeline. No API keys, no database.
 
 ```bash
 npm install
 npm run sim
 ```
 
-You will see the detector fire, fair value estimates, trade signals, and a P&L summary printed to the terminal.
+Expected: detector fires, fair-value estimates print, the router emits
+`buy_yes` / `buy_no`, positions open and close, and a P&L summary at the end.
+
+A clean run currently closes 4/4 wins for **+380¢** under a 2¢ realistic
+spread — Phase 1's exit criterion (positive simulated P&L after slippage).
 
 ---
 
 ## Mode 2 — Paper Trading (live games, no capital)
 
-Connects to real sports feeds and Kalshi market prices. Logs signals but never places real orders (`DRY_RUN=true`).
+Connects to real sports feeds and live Kalshi market quotes. Computes signals
+and tracks positions, but never sends an order to the exchange (`--dry-run`
+is hardcoded into `npm run paper`).
 
-### 1. Set up Supabase
-
-Create a project at [supabase.com](https://supabase.com), then go to **Project Settings → API** and copy your credentials.
+### 1. Get a `.env`
 
 ```bash
 cp .env.example .env
-# fill in SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 ```
 
-Link and push the database schema:
+Paper mode reads only **public** Kalshi market data — no Kalshi API key
+required. Supabase is also optional in paper mode; the durable record is the
+JSONL journal at `logs/paper-*.jsonl`.
+
+If you want Supabase persistence (Phase 0 observation, future Phase 2 paper
+records), fill in `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY` and run:
 
 ```bash
 npx supabase login
@@ -46,44 +57,50 @@ npx supabase link --project-ref <your-project-ref>
 npx supabase db push
 ```
 
-Your project ref is the subdomain in your Supabase URL (e.g. `https://xxxx.supabase.co` → ref is `xxxx`).
-
-### 2. Set up Kalshi
-
-Add your Kalshi API key to `.env`:
-
-```
-KALSHI_API_KEY=your-api-key
-KALSHI_API_SECRET=./keys/kalshi_private.pem   # path to RSA private key file
-```
-
-To use the Kalshi demo environment instead of production, also set:
-
-```
-KALSHI_ENV=demo
-```
-
-### 3. Run
+### 2. Run
 
 ```bash
 npm run paper
 ```
 
-The pipeline polls ESPN, NBA, NFL, and MLB feeds every 500ms. It prints a signal line whenever an event is detected. Press `Ctrl+C` to stop. If no games are live, it will sit silently — that is expected.
+The pipeline polls ESPN, NBA, NFL, and MLB feeds. It prints a `[pipeline]
+event | …` line whenever a scoring play or NFL turnover is detected, plus
+fair-value, signal, position-open, and exit lines. Heartbeats every 30 s
+report tracked games and realized P&L. If no games are live the heartbeat
+ticks but no signals fire — that's expected.
+
+`Ctrl+C` (or SIGINT/SIGTERM) prints a closing summary:
+
+```
+[pipeline] summary | closed=N wins=W losses=L realized=±Xc
+```
+
+### 3. Read the journal
+
+```bash
+npm run replay
+# or, for one specific file:
+npm run replay -- logs/paper-2026-05-03Txx-xx.jsonl
+```
+
+`replay` reads every `paper-*.jsonl` it finds and prints realized P&L,
+hit rate, target-vs-timeout split, median hold time, average entry slippage,
+and a per-series breakdown. Phase 1's record-of-truth check.
 
 ---
 
-## Mode 3 — Observation Mode
+## Mode 3 — Observation Mode (Phase 0)
 
-Records Kalshi price snapshots at T+0, T+15s, T+30s, T+60s, and T+120s after every detected event. No orders placed. Run for 2–4 weeks before going live to quantify the edge empirically.
-
-Requires the same Supabase and Kalshi setup as paper trading.
+Records Kalshi price snapshots at T+0/+15s/+30s/+60s/+120s after every
+detected event. No orders placed. Used to quantify the edge empirically
+before committing capital. Requires Supabase setup.
 
 ```bash
 npm run observe
 ```
 
-Results are written to the `events` and `edge_log` tables in Supabase. View them in the Supabase Table Editor or run the analyzer:
+Writes to the `events` and `edge_log` tables. View in the Supabase Table
+Editor or run the analyzer:
 
 ```bash
 npx ts-node observation/analyzer.ts
@@ -91,23 +108,30 @@ npx ts-node observation/analyzer.ts
 
 ---
 
-## Mode 4 — Live Trading
+## Mode 4 — Live Trading (Phase 2 — gated by edge data)
 
-> Only attempt this after running observation mode and confirming a real edge exists.
+> Only attempt this after observation data and paper-mode JSONL replay
+> together show the edge survives the spread. Read `presentation.md` first —
+> "Modeling Defects We Know About" lists what's still wrong.
 
-Same setup as paper trading. Change one line in `.env`:
+Live mode requires the Kalshi RSA-PSS API key:
 
 ```
-DRY_RUN=false
+KALSHI_API_KEY=your-api-key
+KALSHI_API_SECRET=./keys/kalshi_private.pem   # path to RSA private key
+KALSHI_ENV=demo                                # optional: target sandbox
+DRY_RUN=false                                  # required: actually send orders
 ```
 
-Then run:
+Then:
 
 ```bash
 npm run paper
 ```
 
-The pipeline will place real limit orders on Kalshi. Positions are held up to 60 seconds and exited at the target price or on timeout.
+The pipeline will place real limit orders. Positions are held up to 60
+seconds and exited at target or on timeout. Same JSONL journal records
+real fills.
 
 ---
 
@@ -115,32 +139,35 @@ The pipeline will place real limit orders on Kalshi. Positions are held up to 60
 
 | Variable | Required for | Description |
 |---|---|---|
-| `SUPABASE_URL` | paper, observe, live | Your Supabase project URL |
-| `SUPABASE_ANON_KEY` | paper, observe, live | Publishable API key |
-| `SUPABASE_SERVICE_ROLE_KEY` | paper, observe, live | Secret API key (server-side only) |
-| `KALSHI_API_KEY` | paper, observe, live | Kalshi account API key |
-| `KALSHI_API_SECRET` | paper, observe, live | Path to RSA private key file |
-| `KALSHI_ENV` | optional | Set to `demo` for Kalshi sandbox |
-| `POLL_INTERVAL_MS` | optional | Feed poll rate in ms (default: 500) |
-| `MIN_EDGE_CENTS` | optional | Minimum edge to trade (default: 5) |
-| `MAX_QUANTITY` | optional | Contracts per order (default: 10) |
-| `DRY_RUN` | optional | Set to `false` for live orders (default: true) |
+| `SUPABASE_URL`              | observe, future Phase 2 | Supabase project URL |
+| `SUPABASE_ANON_KEY`         | observe, future Phase 2 | Publishable API key |
+| `SUPABASE_SERVICE_ROLE_KEY` | observe, future Phase 2 | Secret API key (server-side only) |
+| `KALSHI_API_KEY`            | live (Phase 2)          | Kalshi account API key |
+| `KALSHI_API_SECRET`         | live (Phase 2)          | Path to RSA-PSS private key file |
+| `KALSHI_ENV`                | optional                | Set to `demo` for Kalshi sandbox |
+| `POLL_INTERVAL_MS`          | optional                | Feed poll rate in ms (default: 500) |
+| `MIN_EDGE_CENTS`            | optional                | Minimum post-slippage edge to trade (default: 5) |
+| `MAX_SPREAD_CENTS`          | optional                | Max spread to consider tradeable (default: 10) |
+| `MAX_QUANTITY`              | optional                | Contracts per order (default: 10) |
+| `DRY_RUN`                   | optional                | Set to `false` for live orders (default: true) |
+| `ESPN_USER_AGENT`           | optional                | Polite UA on ESPN requests |
 
 ---
 
 ## Trade journal (Phase 1)
 
-Every paper-trade run also writes a JSON-lines journal next to the human log:
+Every paper-trade run writes:
 
 ```
-logs/paper-<timestamp>.log     # human-readable
-logs/paper-<timestamp>.jsonl   # one record per event/signal/open/exit/skip
+logs/paper-<timestamp>.log     # human-readable mirror of console output
+logs/paper-<timestamp>.jsonl   # one structured record per kind
 ```
 
-Each `exit` record carries the realised P&L computed against the cross-spread fill
-prices — buy at ask, sell at bid — so the numbers reflect the friction a live
-order would actually pay. Replay or aggregate offline with whatever script you
-prefer; the format is self-describing.
+Record kinds: `event`, `signal`, `open`, `exit`, `skip`. Each `exit` record
+carries the realized P&L computed against the cross-spread fill prices —
+buy at ask, sell at bid — so the numbers reflect the friction a live order
+would actually pay. The format is self-describing; aggregate offline with
+`npm run replay` or your own script.
 
 ---
 
@@ -150,4 +177,16 @@ prefer; the format is self-describing.
 npm test
 ```
 
-Tests cover the detector, fair value estimator, router, and exit manager. No API keys or database needed.
+20 jest tests cover detector, fair-value (including clock decay, points
+scale, and contract-type scaling), router (including post-slippage edge
+check), exit manager (id-keyed multi-position support), and the bid/ask
+fill helpers. No API keys or database needed.
+
+---
+
+## More Detail
+
+`presentation.md` is the slide-form technical design — architecture, market
+resolver algorithm, fair-value model with worked example, slippage math,
+persistence, and the full list of known modeling and operational defects.
+Read it before sending real orders.

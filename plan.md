@@ -4,6 +4,13 @@ Strategy plan for trading Kalshi (and similar) sports contracts by reacting to i
 
 > "Frontrunning" in the legal sense means trading ahead of a client's known orders. That's not this. This is **latency arbitrage**: exploiting a public-information lag between fast data feeds and slow ones. Correct terminology matters both for clarity and for compliance conversations.
 
+> **Status:** Phase 1 complete on `sports_implementation`. Slippage-aware
+> paper trading runs end-to-end against live feeds and live Kalshi quotes.
+> Sim closes 4/4 wins for +380¢ realized under a 2¢ spread. See
+> `presentation.md` for the full technical design and known defects.
+> Next: Phase 2 (live orders, Supabase orders/fills/positions, liquidity-
+> aware sizing, non-scoring event detection).
+
 ---
 
 ## 1. Thesis
@@ -81,14 +88,19 @@ For each targeted event, we need a quick mapping: *event → expected Δ win pro
 
 Orderbook history on Kalshi is not easily available retroactively, so proving the edge requires a two-phase measurement:
 
-1. **Observation-only phase (no capital):**
-   - Log every targeted event from the fast feed with a timestamp.
-   - Poll Kalshi price at that instant and at +15s / +30s / +60s / +120s.
-   - Measure the realized price path: did casuals actually lag? By how much? For which events?
-2. **Shadow-trading phase:**
-   - Run the full pipeline but record "would-have" orders instead of placing them.
-   - Mark against actual Kalshi fills to estimate realistic slippage.
-3. **Live phase:** Start with minimal size, scale up only if the measured edge survives live-fill friction.
+1. **Observation-only phase (no capital):** built. `npm run observe` writes
+   detected events plus Kalshi YES-mid at T+0/+15s/+30s/+60s/+120s into
+   Supabase tables `events` and `edge_log`. `observation/analyzer.ts`
+   aggregates into per-sport hit-rate and drift reports. Status: infra
+   ready, weeks of live data still to be collected.
+2. **Shadow-trading phase:** built. `npm run paper` runs the full pipeline
+   against live feeds + live Kalshi quotes with `DRY_RUN=true`. Every
+   event/signal/open/exit lands in a JSONL journal at `logs/paper-*.jsonl`.
+   `npm run replay` aggregates that journal into realized P&L, hit rate,
+   target-vs-timeout split, median hold, average entry slippage, and a
+   per-series breakdown — all offline, no DB required.
+3. **Live phase:** queued. Set `DRY_RUN=false` once the journal data shows
+   realized edge survives the spread.
 
 Key metrics to track: **hit rate** (% of events that moved in our direction), **avg price move during hold**, **avg slippage**, **latency distribution** (fast feed → order acked).
 
@@ -110,24 +122,39 @@ Key metrics to track: **hit rate** (% of events that moved in our direction), **
 
 ## 8. Phased roadmap
 
-| Phase | Scope | Exit criteria |
-| :---- | :---- | :---- |
-| 0. Measure | Log events + Kalshi price paths for 2–4 weeks. No trading. | Quantified edge for ≥ 1 event type in ≥ 1 sport. |
-| 1. Paper | Full pipeline, simulated orders against our existing paper-trading DB. | Simulated P&L positive after realistic slippage assumptions. |
-| 2. Live small | Minimal size on one sport, one event type. | Live P&L tracks simulated P&L within tolerance. |
-| 3. Scale | Expand to more event types / sports. Add league-official feeds. | Throughput or latency limits reached. |
-| 4. Harden | Redundant feeds, monitoring, circuit breakers, compliance review. | Ready for meaningful capital. |
+| Phase | Status | Scope | Exit criteria |
+| :---- | :---- | :---- | :---- |
+| 0. Measure | infra done, data pending | Log events + Kalshi price paths for 2–4 weeks. No trading. | Quantified edge for ≥ 1 event type in ≥ 1 sport. |
+| 1. Paper | **done** | Full pipeline, simulated orders with realistic slippage. JSONL journal as record-of-truth. | Simulated P&L positive after realistic slippage. ✓ +380¢ on canned data. |
+| 2. Live small | next | Minimal size on one sport, one event type. Persist to Supabase orders/fills/positions. Liquidity-aware sizing. | Live P&L tracks simulated P&L within tolerance. |
+| 3. Scale | queued | Expand event types / sports. Add NBA ejections, MLB pitching changes, injury news (Twitter/X). League-official feeds where they exist. | Throughput or latency limits reached. |
+| 4. Harden | queued | Redundant feeds, monitoring, circuit breakers, compliance review. | Ready for meaningful capital. |
+
+Phase 1's slippage check happens pre-fire in `router.ts`: any signal whose
+post-spread expected edge is below `MIN_EDGE_CENTS` is dropped before a
+position opens. See `presentation.md` for the full technical breakdown and
+known modeling defects.
 
 ## 9. Fit with the existing Fintech-Predictions app
 
-The paper-trading MVP on the `database` branch is actually **perfect infrastructure for Phase 1**:
-- `markets`, `price_history`, `orders`, `fills`, `positions` already exist.
-- Add an `events` table: `id`, `market_id`, `sport`, `event_type`, `detected_at`, `source`, `payload_json`.
-- Add an `edge_log` table: `event_id`, `kalshi_price_at_detection`, `price_at_t_plus_15s/30s/60s`, `simulated_pnl`.
-- Princeden's ingestion already handles market-data polling — the events feed is a natural extension.
-- Eric's order flow can back-end the simulated trades for Phase 1.
+What's wired up today (`sports_implementation` branch):
+- `events` and `edge_log` tables added in
+  `supabase/migrations/0004_sports_arb.sql`. `observation/run.ts` writes
+  to both. `observation/analyzer.ts` reports.
+- The full sports-arb pipeline lives under `sports_arb/` — feeds,
+  detector, fair-value, router, exit manager, market resolver, Kalshi
+  client. Independent of Princeden's market-data polling.
+- Phase 1 paper trades land in JSONL (`logs/paper-*.jsonl`), not in
+  Supabase. The journal is durable and self-describing; `npm run replay`
+  reads it.
 
-This means Phase 0 and Phase 1 are mostly data work, not a new codebase.
+What's still on the `database` branch and **not** yet merged here:
+- `users`, `markets`, `price_history`, `orders`, `fills`, `positions`
+  tables. These have an `auth.users` foreign-key dependency and
+  Eric's order flow.
+- Phase 2 will wire paper (and eventually live) trades into the
+  relational tables so the rest of the app sees the same record of
+  truth.
 
 ## 10. Deliberate non-goals (for now)
 
