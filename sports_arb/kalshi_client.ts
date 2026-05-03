@@ -3,18 +3,32 @@ import { readFileSync } from 'fs';
 
 const BASE = process.env.KALSHI_ENV === 'demo'
   ? 'https://demo-api.kalshi.co/trade-api/v2'
-  : 'https://trading-api.kalshi.com/trade-api/v2';
+  : 'https://api.elections.kalshi.com/trade-api/v2';
 
+// Kalshi switched the public response shape to dollar-denominated strings in late 2025.
+// We keep both the new and legacy fields for forward/backward compatibility.
 export interface KalshiMarket {
   ticker: string;
   event_ticker: string;
   title: string;
   status: string;
-  yes_bid: number;
-  yes_ask: number;
-  no_bid: number;
-  no_ask: number;
-  last_price: number;
+  yes_bid?: number;
+  yes_ask?: number;
+  no_bid?: number;
+  no_ask?: number;
+  last_price?: number;
+  yes_bid_dollars?: string;
+  yes_ask_dollars?: string;
+  no_bid_dollars?: string;
+  no_ask_dollars?: string;
+  last_price_dollars?: string;
+}
+
+function dollarsToCents(s: string | undefined): number | null {
+  if (s == null) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
 }
 
 // Returns the YES mid-price in cents (0–100), or null on failure.
@@ -24,10 +38,12 @@ export async function getMarketPrice(ticker: string): Promise<number | null> {
     if (!res.ok) return null;
     const { market: m } = await res.json() as { market: KalshiMarket };
     if (!m) return null;
-    if (m.yes_bid != null && m.yes_ask != null) {
-      return Math.round((m.yes_bid + m.yes_ask) / 2);
+    const bid = dollarsToCents(m.yes_bid_dollars) ?? m.yes_bid ?? null;
+    const ask = dollarsToCents(m.yes_ask_dollars) ?? m.yes_ask ?? null;
+    if (bid != null && ask != null) {
+      return Math.round((bid + ask) / 2);
     }
-    return m.last_price ?? null;
+    return dollarsToCents(m.last_price_dollars) ?? m.last_price ?? null;
   } catch {
     return null;
   }
@@ -92,7 +108,7 @@ export async function placeOrder(
 ): Promise<string> {
   // Kalshi always uses yes_price for limit orders (1–99 cents).
   const yes_price = side === 'yes' ? limitCents : 100 - limitCents;
-  const path = '/trade-api/v2/portfolio/orders';
+  const path = new URL(`${BASE}/portfolio/orders`).pathname;
   const body = JSON.stringify({ ticker, action: 'buy', side, count, type: 'limit', yes_price });
 
   const headers = buildAuthHeaders('POST', path, body);

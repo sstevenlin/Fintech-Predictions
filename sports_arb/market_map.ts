@@ -1,11 +1,12 @@
 import { listMarkets, KalshiMarket } from './kalshi_client';
 import type { Sport } from './types';
 
-// Kalshi series tickers by sport. Extend as Kalshi adds new series.
+// Kalshi series tickers by sport, in priority order.
+// Per-game moneylines take precedence; series-winner contracts are the live fallback for playoff games.
 const SERIES_BY_SPORT: Partial<Record<Sport, string[]>> = {
-  NBA: ['NBAWIN'],
-  NFL: ['NFLWIN'],
-  MLB: ['MLBWIN'],
+  NBA: ['KXNBAGAME', 'KXNBASERIES'],
+  NFL: ['KXNFLGAME'],
+  MLB: ['KXMLBGAME'],
 };
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -36,8 +37,9 @@ async function getMarketsForSport(sport: Sport): Promise<KalshiMarket[]> {
   return all;
 }
 
-// Maps a game to its Kalshi market ticker by matching both team abbreviations
-// against the event_ticker string. Returns null if no active market is found.
+// Maps a game to its Kalshi market ticker. Prefers the home team's side of the
+// market so the home-perspective fair-value delta applies without sign-flipping.
+// Returns null if no active market is found.
 export async function resolveKalshiTicker(
   gameId: string,
   homeTeam: string,
@@ -50,16 +52,16 @@ export async function resolveKalshiTicker(
   const home = homeTeam.toUpperCase();
   const away = awayTeam.toUpperCase();
 
-  const match = markets.find(m => {
+  const eventMatches = markets.filter(m => {
     const t = m.event_ticker.toUpperCase();
     return t.includes(home) && t.includes(away);
   });
+  if (eventMatches.length === 0) return null;
 
-  if (match) {
-    tickerByGame.set(gameId, match.ticker);
-    console.log(`[market_map] ${gameId} → ${match.ticker}`);
-    return match.ticker;
-  }
+  const homeSide = eventMatches.find(m => m.ticker.toUpperCase().endsWith(`-${home}`));
+  const chosen = homeSide ?? eventMatches[0];
 
-  return null;
+  tickerByGame.set(gameId, chosen.ticker);
+  console.log(`[market_map] ${gameId} (${away}@${home}) → ${chosen.ticker}`);
+  return chosen.ticker;
 }
